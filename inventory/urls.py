@@ -7,9 +7,12 @@ urlpatterns = [
     path('locations/<int:location_id>/stock/', views.stock_balance),
     path('transactions/', views.transaction_history),
     path('transactions/<int:transaction_id>/',views.transaction_history),
-    path('in/',views.inventory_in),
     path('availability/<int:product_id>/', views.availability),
-    path('reservations/', views.reservation),
-    path('reservations/<int:sales_order_id>/release/', views.release)
+    path('in/',views.inventory_in),
+    path('reservations/', views.stock_reservation),
+    path(
+    'reservations/<str:sales_order_id>/release/',
+    views.reservation_release
+)
 
 ]

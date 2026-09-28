@@ -1,9 +1,6 @@
 from rest_framework import serializers
-from .dummy_products import DUMMY_PRODUCT_IDS
-from .dummy_locations import DUMMY_LOCATIONS
-from .dumy_warehouse import DUMMY_WAREHOUSES
-from .models import InventoryTransaction,StockBalance
-
+from .models import Product,InventoryTransaction,StockBalance
+from Warehouse.models import Warehouse,Location
 
 class StockBalanceSerializer(serializers.ModelSerializer):
 
@@ -12,9 +9,9 @@ class StockBalanceSerializer(serializers.ModelSerializer):
 
         fields = [
             'stock_balance_id',
-            'product_id',
-            'warehouse_id',
-            'location_id',
+            'product',
+            'warehouse',
+            'location',
             'total_quantity',
             'reserved_quantity',
             'available_quantity',
@@ -26,6 +23,8 @@ class StockBalanceSerializer(serializers.ModelSerializer):
             'updated_at',
         ]
 
+    
+
 class InventoryTransactionSerializer(serializers.ModelSerializer):
 
     class Meta:
@@ -33,133 +32,95 @@ class InventoryTransactionSerializer(serializers.ModelSerializer):
 
         fields = [
             'transaction_id',
-            'product_id',
+            'product',
             'transaction_type',
-            'adjustment_type',
-            'adjustment_reason',
             'quantity',
-            'reference_type',
-            'reference_id',
-            'created_at',
+            'source_reference',
+            'transaction_date',
         ]
 
         read_only_fields = [
             'transaction_id',
-            'created_at',
+            'transaction_date',
         ]
+
+
 class AvailabilitySerializer(serializers.ModelSerializer):
 
     class Meta:
         model = StockBalance
+
         fields = [
-            'product_id',
+            'product',
             'available_quantity',
         ]
-        
+
 
 class InventoryInSerializer(serializers.Serializer):
     grn_id = serializers.CharField(max_length=100)
     product_id = serializers.IntegerField()
     warehouse_id = serializers.IntegerField()
     location_id = serializers.IntegerField()
-    quantity = serializers.IntegerField()
-
-    def validate_quantity(self, value):
-
-        if value <= 0:
-            raise serializers.ValidationError(
-                "Quantity must be greater than zero."
-            )
-
-        return value
-
+    quantity = serializers.IntegerField(min_value=1)
     def validate_product_id(self, value):
-
-        if value not in DUMMY_PRODUCT_IDS:
+        if not Product.objects.filter(Product_id=value).exists():
             raise serializers.ValidationError(
-            "Invalid product. Product does not exist."
-        )
-
+                "Invalid product. Product does not exist."
+            )
         return value
+    
+    def validate_warehouse(self, value):
+        if not Warehouse.objects.filter(
+            warehouse_id=value.warehouse_id
+            ).exists():
+            raise serializers.ValidationError(
+                "Warehouse does not exist."
+            )
+    
+        return value
+    
+    def validate_location(self, value):
+        if not Location.objects.filter(
+            location_id=value.location_id
+            ).exists():
+            raise serializers.ValidationError(
+                "Location does not exist."
+            )
+    
+        return value
+    
+    def validate(self, data):
+    
+        warehouse = data.get('warehouse')
+        location = data.get('location')
+    
+        if warehouse and location:
+            if location.warehouse_id != warehouse.warehouse_id:
+                raise serializers.ValidationError({
+                    'location':
+                        'The selected location does not belong '
+                        'to the selected warehouse.'
+            })
+    
+        return data
+    
 
-
-def validate_warehouse_id(self, value):
-
-    try:
-        warehouse = DUMMY_WAREHOUSES.objects.get(warehouse_id=value)
-    except DUMMY_WAREHOUSES.DoesNotExist:
-        raise serializers.ValidationError("Warehouse does noe exist")
-
-    if not warehouse.is_active:
-        raise serializers.ValidationError(
-            "Warehouse is inactive."
-        )
-
-    return value
-
-def validate_location_id(self, value):
-    try:
-        location = DUMMY_LOCATIONS.objects.get(
-            location_id=value
-        )
-    except DUMMY_LOCATIONS.DoesNotExist:
-        raise serializers.ValidationError(
-            "Location does not exist."
-        )
-
-    if not location.is_active:
-        raise serializers.ValidationError(
-            "Location is inactive."
-        )
-
-    return value
-def validate(self, data):
-
-    warehouse_id = data.get("warehouse_id")
-    location_id = data.get("location_id")
-
-
-    location = DUMMY_LOCATIONS.objects.get(
-        location_id=location_id
-    )
-
-    if location.warehouse_id != warehouse_id:
-        raise serializers.ValidationError({
-            "location_id":
-            "The selected location does not belong "
-            "to the selected warehouse."
-        })
-
-    return data
-        
-
-class ReservationSerializer(serializers.Serializer):
+class StockReservationSerializer(serializers.Serializer):
     sales_order_id = serializers.CharField(max_length=100)
     product_id = serializers.IntegerField()
     warehouse_id = serializers.IntegerField()
     location_id = serializers.IntegerField()
     quantity = serializers.IntegerField()
-    def validate_quantity(self, value):
 
+    def validate_quantity(self, value):
         if value <= 0:
             raise serializers.ValidationError(
                 "Reservation quantity must be greater than zero."
             )
-
         return value
 
-
-class ReleaseSerializer(serializers.Serializer):
-    sales_order_id = serializers.CharField(max_length=100)
+class ReservationReleaseSerializer(serializers.Serializer):
     product_id = serializers.IntegerField()
     warehouse_id = serializers.IntegerField()
     location_id = serializers.IntegerField()
-    quantity = serializers.IntegerField()
-    def validate_quantity(self, value):
-
-        if value <= 0:
-            raise serializers.ValidationError(
-                "Release quantity must be greater than zero."
-            )
-
-        return value
+    quantity = serializers.IntegerField(min_value=1)

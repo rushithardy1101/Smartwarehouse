@@ -6,75 +6,49 @@ from rest_framework.exceptions import ValidationError
 from .models import StockBalance, InventoryTransaction
 from .serializers import (
     InventoryTransactionSerializer,
-    StockBalanceSerializer,
-    InventoryInSerializer,ReleaseSerializer,ReservationSerializer
+    StockBalanceSerializer,InventoryInSerializer,StockReservationSerializer,ReservationReleaseSerializer
 )
-from .service import process_inventory_in,process_reservation,process_release
-
+from .service import process_inventory_in,process_stock_reservation,process_reservation_release
 
 @api_view(['GET'])
 def stock_balance(request, product_id=None, location_id=None):
-    try:
-        stock = StockBalance.objects.all()
 
-        if product_id is not None:
-            stock = stock.filter(product_id=product_id)
-        if location_id is not None:
-            stock = stock.filter(location_id=location_id)
-        serializer = StockBalanceSerializer(stock,many=True)
-        return Response(serializer.data,status=status.HTTP_200_OK)
-    except Exception:
-        return Response(status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    stock = StockBalance.objects.all()
+
+    if product_id is not None:
+        stock = stock.filter(product_id=product_id)
+
+        if not stock.exists():
+            return Response(status=status.HTTP_400_BAD_REQUEST)
+
+    if location_id is not None:
+        stock = stock.filter(location_id=location_id)
+
+        if not stock.exists():
+            return Response(status=status.HTTP_400_BAD_REQUEST)
+
+    serializer = StockBalanceSerializer(stock, many=True)
+
+    return Response(serializer.data,status=status.HTTP_200_OK)
 
 @api_view(['GET'])
 def transaction_history(request, transaction_id=None):
-    try:
-        if transaction_id is not None:
+    if transaction_id is not None:
 
-            transaction = get_object_or_404(InventoryTransaction,transaction_id=transaction_id)
+        transaction = get_object_or_404(InventoryTransaction,transaction_id=transaction_id)
 
-            serializer = InventoryTransactionSerializer(transaction)
-            return Response(serializer.data)
+        serializer = InventoryTransactionSerializer(transaction)
+        return Response(serializer.data)
 
-        transactions = InventoryTransaction.objects.all()
+    transactions = InventoryTransaction.objects.all()
 
-        serializer = InventoryTransactionSerializer(transactions, many=True)
-        return Response(serializer.data,status=status.HTTP_200_OK)
-    except Exception:
-        return Response(status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
-@api_view(['POST'])
-def inventory_in(request):
-
-    serializer = InventoryInSerializer(
-        data=request.data
-    )
-
-    if serializer.is_valid():
-
-        result = process_inventory_in(
-            grn_id=serializer.validated_data['grn_id'],
-            received_quantity=serializer.validated_data['quantity']
-        )
-
-        return Response(
-            result,
-            status=status.HTTP_200_OK
-        )
-
-    return Response(
-        serializer.errors,
-        status=status.HTTP_400_BAD_REQUEST
-    )
+    serializer = InventoryTransactionSerializer(transactions, many=True)
+    return Response(serializer.data,status=status.HTTP_200_OK)
 
 @api_view(['GET'])
 def availability(request, product_id):
 
-    stock = StockBalance.objects.filter(
-        product_id=product_id
-    )
-
+    stock = StockBalance.objects.filter(product_id=product_id)
     if not stock.exists():
         return Response(
             {
@@ -95,22 +69,65 @@ def availability(request, product_id):
         },
         status=status.HTTP_200_OK
     )
+
+
+
 @api_view(['POST'])
-def reservation(request):
-
-    serializer = ReservationSerializer(
-        data=request.data
-    )
-
+def inventory_in(request):
+    serializer = InventoryInSerializer(data=request.data)
     if not serializer.is_valid():
         return Response(
-            serializer.errors,
+            {
+                "success": False,
+                "message": "Invalid inventory IN request.",
+                "errors": serializer.errors  
+            },
             status=status.HTTP_400_BAD_REQUEST
         )
 
     try:
+        result = process_inventory_in(
+            grn_id=serializer.validated_data['grn_id'],
+            product_id=serializer.validated_data['product_id'],
+            warehouse_id=serializer.validated_data['warehouse_id'],
+            location_id=serializer.validated_data['location_id'],
+            received_quantity=serializer.validated_data['quantity']
+        )
 
-        result = process_reservation(
+        return Response(
+            {
+                "success": True,
+                "message": "Inventory received successfully.",
+                "data": result
+            },
+            status=status.HTTP_200_OK
+        )
+
+    except ValidationError as e:
+        return Response(
+            {
+                "success": False,
+                "message": e.detail if hasattr(e, 'detail') else str(e)
+            },
+            status=status.HTTP_400_BAD_REQUEST
+        )
+@api_view(['POST'])
+def stock_reservation(request):
+
+    serializer = StockReservationSerializer(data=request.data)
+
+    if not serializer.is_valid():
+        return Response(
+            {
+                "success": False,
+                "message": "Invalid stock reservation request.",
+                "errors": serializer.errors
+            },
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    try:
+        result = process_stock_reservation(
             sales_order_id=serializer.validated_data['sales_order_id'],
             product_id=serializer.validated_data['product_id'],
             warehouse_id=serializer.validated_data['warehouse_id'],
@@ -119,35 +136,44 @@ def reservation(request):
         )
 
         return Response(
-            result,
+            {
+                "success": True,
+                "message": "Stock reserved successfully.",
+                "data": result
+            },
             status=status.HTTP_200_OK
         )
 
-    except ValidationError as error:
-
+    except ValidationError as e:
         return Response(
             {
-                "error": error.detail
+                "success": False,
+                "message": (
+                    e.detail[0]
+                    if isinstance(e.detail, list)
+                    else e.detail
+                )
             },
             status=status.HTTP_400_BAD_REQUEST
         )
 @api_view(['POST'])
-def release(request,sales_order_id):
+def reservation_release(request, sales_order_id):
 
-    serializer = ReleaseSerializer(
-        data=request.data
-    )
+    serializer = ReservationReleaseSerializer(data=request.data)
 
     if not serializer.is_valid():
         return Response(
-            serializer.errors,
+            {
+                "success": False,
+                "message": "Invalid reservation release request.",
+                "errors": serializer.errors
+            },
             status=status.HTTP_400_BAD_REQUEST
         )
 
     try:
-
-        result = process_release(
-            sales_order_id=serializer.validated_data['sales_order_id'],
+        result = process_reservation_release(
+            sales_order_id=sales_order_id,
             product_id=serializer.validated_data['product_id'],
             warehouse_id=serializer.validated_data['warehouse_id'],
             location_id=serializer.validated_data['location_id'],
@@ -155,16 +181,19 @@ def release(request,sales_order_id):
         )
 
         return Response(
-            result,
+            {
+                "success": True,
+                "message": "Reservation released successfully.",
+                "data": result
+            },
             status=status.HTTP_200_OK
         )
 
-    except ValidationError as error:
-
+    except ValidationError as e:
         return Response(
             {
-                "error": error.detail
+                "success": False,
+                "message": str(e)
             },
             status=status.HTTP_400_BAD_REQUEST
         )
-
